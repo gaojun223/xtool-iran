@@ -4,6 +4,9 @@
 
 name: Telegram Proxy
 
+permissions:
+  contents: write
+
 on:
   push:
     paths:

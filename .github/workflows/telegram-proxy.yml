@@ -36,12 +36,18 @@ jobs:
       - name: Process request (push trigger)
         if: github.event_name == 'push'
         run: |
-          LAST_FILE=$(ls -t proxy/requests/ | head -1)
+          # Check if there are actual request files (not .gitkeep)
+          REQ_FILES=$(ls proxy/requests/*.json 2>/dev/null || echo "")
+          if [ -z "$REQ_FILES" ]; then
+            echo "No JSON request files to process, exiting"
+            exit 0
+          fi
+          LAST_FILE=$(ls -t proxy/requests/*.json 2>/dev/null | head -1)
           if [ -z "$LAST_FILE" ]; then
             echo "No request files found"
             exit 0
           fi
-          REQ_FILE="proxy/requests/$LAST_FILE"
+          REQ_FILE="$LAST_FILE"
           echo "Processing: $REQ_FILE"
           
           METHOD=$(python3 -c "import json; print(json.load(open('$REQ_FILE')).get('method','GET'))")

@@ -17,5 +17,7 @@ jobs:
       - name: Run
         env:
           TG_TOKEN: "8779284317:AAG0ZfiieopkK1bsu8TGwoH8QMj6jNrHzvY"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           python3 proxy/daemon.py

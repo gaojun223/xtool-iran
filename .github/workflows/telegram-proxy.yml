@@ -1,0 +1,98 @@
+# Telegram API Proxy via GitHub Actions
+# Triggers on pushes to proxy/requests/ directory
+# Makes Telegram API calls and saves responses
+
+name: Telegram Proxy
+
+on:
+  push:
+    paths:
+      - 'proxy/requests/**'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      method:
+        description: 'HTTP method'
+        required: true
+        default: 'GET'
+      url_path:
+        description: 'URL path (after api.telegram.org/)'
+        required: true
+      body:
+        description: 'Request body (JSON, optional)'
+        required: false
+      response_id:
+        description: 'Response ID for file naming'
+        required: true
+
+jobs:
+  proxy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Process request (push trigger)
+        if: github.event_name == 'push'
+        run: |
+          LAST_FILE=$(ls -t proxy/requests/ | head -1)
+          if [ -z "$LAST_FILE" ]; then
+            echo "No request files found"
+            exit 0
+          fi
+          REQ_FILE="proxy/requests/$LAST_FILE"
+          echo "Processing: $REQ_FILE"
+          
+          METHOD=$(python3 -c "import json; print(json.load(open('$REQ_FILE')).get('method','GET'))")
+          URL_PATH=$(python3 -c "import json; print(json.load(open('$REQ_FILE')).get('url_path',''))")
+          BODY=$(python3 -c "import json; d=json.load(open('$REQ_FILE')); print(d.get('body','') or '')")
+          RESP_ID=$(python3 -c "import json; print(json.load(open('$REQ_FILE')).get('response_id','unknown'))")
+          
+          echo "Method: $METHOD, Path: $URL_PATH"
+          
+          if [ -n "$BODY" ] && [ "$BODY" != "None" ] && [ "$BODY" != "null" ]; then
+            RESPONSE=$(curl -s -X "$METHOD" \
+              "https://api.telegram.org/$URL_PATH" \
+              -H "Content-Type: application/json" \
+              -d "$BODY")
+          else
+            RESPONSE=$(curl -s -X "$METHOD" \
+              "https://api.telegram.org/$URL_PATH")
+          fi
+          
+          echo "$RESPONSE" > "proxy/responses/${RESP_ID}.json"
+          echo "Response saved to proxy/responses/${RESP_ID}.json"
+          
+          # Remove the processed request file
+          rm "$REQ_FILE"
+
+      - name: Process request (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          METHOD="${{ github.event.inputs.method }}"
+          URL_PATH="${{ github.event.inputs.url_path }}"
+          BODY="${{ github.event.inputs.body }}"
+          RESP_ID="${{ github.event.inputs.response_id }}"
+          
+          echo "Method: $METHOD, Path: $URL_PATH"
+          
+          if [ -n "$BODY" ] && [ "$BODY" != "" ] && [ "$BODY" != "null" ]; then
+            RESPONSE=$(curl -s -X "$METHOD" \
+              "https://api.telegram.org/$URL_PATH" \
+              -H "Content-Type: application/json" \
+              -d "$BODY")
+          else
+            RESPONSE=$(curl -s -X "$METHOD" \
+              "https://api.telegram.org/$URL_PATH")
+          fi
+          
+          echo "$RESPONSE" > "proxy/responses/${RESP_ID}.json"
+          echo "Response saved to proxy/responses/${RESP_ID}.json"
+
+      - name: Commit and push
+        run: |
+          git config --global user.name "gaojun223"
+          git config --global user.email "53131188@qq.com"
+          git add proxy/
+          git diff --cached --quiet || (git commit -m "proxy: auto response [skip ci]" && git push)

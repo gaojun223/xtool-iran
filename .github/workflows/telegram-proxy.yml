@@ -1,7 +1,3 @@
-# Telegram API Proxy via GitHub Actions
-# Triggers on pushes to proxy/requests/ directory
-# Makes Telegram API calls and saves responses
-
 name: Telegram Proxy
 
 permissions:
@@ -33,75 +29,65 @@ jobs:
   proxy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Process request (push trigger)
-        if: github.event_name == 'push'
+      - name: Extract request params
         run: |
-          # Check if there are actual request files (not .gitkeep)
-          REQ_FILES=$(ls proxy/requests/*.json 2>/dev/null || echo "")
-          if [ -z "$REQ_FILES" ]; then
-            echo "No JSON request files to process, exiting"
-            exit 0
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "METHOD=${{ github.event.inputs.method }}" >> $GITHUB_ENV
+            echo "URL_PATH=${{ github.event.inputs.url_path }}" >> $GITHUB_ENV
+            echo "BODY=${{ github.event.inputs.body }}" >> $GITHUB_ENV
+            echo "RESP_ID=${{ github.event.inputs.response_id }}" >> $GITHUB_ENV
+          else
+            REQ_FILES=$(ls proxy/requests/*.json 2>/dev/null || echo "")
+            if [ -z "$REQ_FILES" ]; then
+              echo "No JSON request files, exiting"
+              exit 0
+            fi
+            LAST_FILE=$(ls -t proxy/requests/*.json 2>/dev/null | head -1)
+            echo "REQ_FILE=$LAST_FILE" >> $GITHUB_ENV
+            METHOD=$(python3 -c "import json; print(json.load(open('$LAST_FILE')).get('method','GET'))")
+            URL_PATH=$(python3 -c "import json; print(json.load(open('$LAST_FILE')).get('url_path',''))")
+            BODY=$(python3 -c "import json; d=json.load(open('$LAST_FILE')); print(d.get('body','') or '')")
+            RESP_ID=$(python3 -c "import json; print(json.load(open('$LAST_FILE')).get('response_id','unknown'))")
+            echo "METHOD=$METHOD" >> $GITHUB_ENV
+            echo "URL_PATH=$URL_PATH" >> $GITHUB_ENV
+            echo "BODY=$BODY" >> $GITHUB_ENV
+            echo "RESP_ID=$RESP_ID" >> $GITHUB_ENV
           fi
-          LAST_FILE=$(ls -t proxy/requests/*.json 2>/dev/null | head -1)
-          if [ -z "$LAST_FILE" ]; then
-            echo "No request files found"
-            exit 0
-          fi
-          REQ_FILE="$LAST_FILE"
-          echo "Processing: $REQ_FILE"
-          
-          METHOD=$(python3 -c "import json; print(json.load(open('$REQ_FILE')).get('method','GET'))")
-          URL_PATH=$(python3 -c "import json; print(json.load(open('$REQ_FILE')).get('url_path',''))")
-          BODY=$(python3 -c "import json; d=json.load(open('$REQ_FILE')); print(d.get('body','') or '')")
-          RESP_ID=$(python3 -c "import json; print(json.load(open('$REQ_FILE')).get('response_id','unknown'))")
-          
-          echo "Method: $METHOD, Path: $URL_PATH"
-          
-          if [ -n "$BODY" ] && [ "$BODY" != "None" ] && [ "$BODY" != "null" ]; then
+
+      - name: Execute Telegram API call
+        run: |
+          echo "Calling: $METHOD https://api.telegram.org/$URL_PATH"
+          if [ -n "$BODY" ] && [ "$BODY" != "" ] && [ "$BODY" != "null" ] && [ "$BODY" != "None" ]; then
             RESPONSE=$(curl -s -X "$METHOD" \
               "https://api.telegram.org/$URL_PATH" \
               -H "Content-Type: application/json" \
-              -d "$BODY")
+              -d "$BODY" 2>&1)
           else
             RESPONSE=$(curl -s -X "$METHOD" \
-              "https://api.telegram.org/$URL_PATH")
+              "https://api.telegram.org/$URL_PATH" 2>&1)
           fi
-          
-          echo "$RESPONSE" > "proxy/responses/${RESP_ID}.json"
-          echo "Response saved to proxy/responses/${RESP_ID}.json"
-          
-          # Remove the processed request file
-          rm "$REQ_FILE"
+          echo "$RESPONSE"
+          echo "RESPONSE<<EOF" >> $GITHUB_ENV
+          echo "$RESPONSE" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-      - name: Process request (manual dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload response to repo
         run: |
-          METHOD="${{ github.event.inputs.method }}"
-          URL_PATH="${{ github.event.inputs.url_path }}"
-          BODY="${{ github.event.inputs.body }}"
-          RESP_ID="${{ github.event.inputs.response_id }}"
+          RESP_FILE="proxy/responses/${RESP_ID}.json"
+          B64_CONTENT=$(echo "$RESPONSE" | base64 -w0 || python3 -c "import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())")
           
-          echo "Method: $METHOD, Path: $URL_PATH"
+          # Upload via API
+          UPLOAD_RESP=$(curl -s -X PUT \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/$RESP_FILE" \
+            -d "{\"message\":\"proxy: resp ${RESP_ID} [skip ci]\",\"content\":\"$B64_CONTENT\"}")
           
-          if [ -n "$BODY" ] && [ "$BODY" != "" ] && [ "$BODY" != "null" ]; then
-            RESPONSE=$(curl -s -X "$METHOD" \
-              "https://api.telegram.org/$URL_PATH" \
-              -H "Content-Type: application/json" \
-              -d "$BODY")
-          else
-            RESPONSE=$(curl -s -X "$METHOD" \
-              "https://api.telegram.org/$URL_PATH")
+          echo "Upload result: $(echo $UPLOAD_RESP | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get(\"content\",{}).get(\"name\",\"FAILED\"))' 2>/dev/null || echo 'FAILED')"
+          
+          # Clean up request file if this was push-triggered
+          if [ -n "$REQ_FILE" ] && [ -f "$REQ_FILE" ]; then
+            rm -f "$REQ_FILE"
           fi
-          
-          echo "$RESPONSE" > "proxy/responses/${RESP_ID}.json"
-          echo "Response saved to proxy/responses/${RESP_ID}.json"
-
-      - name: Commit and push
-        run: |
-          git config --global user.name "gaojun223"
-          git config --global user.email "53131188@qq.com"
-          git add proxy/
-          git diff --cached --quiet || (git commit -m "proxy: auto response [skip ci]" && git push)

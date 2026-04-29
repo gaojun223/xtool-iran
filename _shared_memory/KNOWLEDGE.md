@@ -17,11 +17,21 @@
 - Cloudflare Free: CDN, Workers, R2存储
 
 ## 技术栈
-- 主机: Linux (agentuser)
-- LLM: DeepSeek V4 Flash (主), 备用通道待扩展
+- 主机: Linux (agentuser) / Tencent Cloud 腾讯云
+- LLM: DeepSeek V4 Flash (主)
+- **备用LLM通道（已确认可用）**:
+  - OpenRouter: 3个免费模型 + Llama-3-8B 接近免费
+  - Cloudflare AI: 1万次/天免费
+  - (Gemini/Groq/HF 需要克隆体在国外注册后拿key)
 - 框架: Hermes Agent
 - 平台连接: WeChat, Telegram
-- 存储: 本地文件系统, GitHub
+- 存储: 本地文件系统, GitHub, 共享记忆 _shared_memory/
+
+## 网络环境
+- 服务器位于腾讯云(中国大陆)
+- 公网IP: 124.221.32.101, 走Cloudflare SJC节点
+- GFW状态: Google/HuggingFace被墙, GitHub/Cloudflare/OpenRouter可用
+- 翻墙: 未配置 (proxychains4已安装但未启用)
 
 ## 已知问题
 - DeepSeek V4 Flash 70K tokens时reasoning bug (已打补丁)
